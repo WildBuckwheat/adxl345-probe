@@ -14,7 +14,7 @@ REG_INT_SOURCE = 0x30
 DUR_SCALE = 0.000625  # 0.625 msec / LSB
 TAP_SCALE = 0.0625 * adxl345.FREEFALL_ACCEL  # 62.5mg/LSB * Earth gravity in mm/s**2
 
-ADXL345_REST_TIME = 0 # 0.1
+ADXL345_REST_TIME = 0.1
 
 REG_OFSX = 0x1E
 REG_OFSY = 0x1F
@@ -356,7 +356,8 @@ class ADXL345Probe:
     def probe_prepare(self, hmove, axis="z"):
         chip = self.adxl345
 
-        # We don't switch the fans off before homing X and Y. If you want to, use HOTEND_FAN_OFF in your g-code.
+        # We don't switch the fans off before homing X and Y because we don't need such sensitivity that the fans would cause any problems.
+        # If do you want to, e.g. to make sure the fans have stopped spinning before the Z probing, you can use HOTEND_FAN_OFF in your g-code.
         if axis=="z":
             self.control_fans(disable=True, delay_if_necessary=(axis=="z"))
             
