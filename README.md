@@ -17,6 +17,7 @@ Results you can expect for a properly tuned system (This was on a Voron Trident,
 ```
 probe accuracy results: maximum 0.007500, minimum 0.000937, range 0.006563, average 0.004031, median 0.004219, standard deviation 0.001841
 ```
+I've found this to work reliably on a Voron 0, but more intermittently on a Trident. See the tuning guide below.
 
 Force on the bed was measured using a standard kitchen scale, this was approximately 200g. A CAN bus board was used, so a direct connection might result in a quicker stop (See Multi MCU homing in the Klipper docs for more information on this).
 (This will probably have improved with the move from TAP mode to ACT.)
@@ -59,7 +60,7 @@ int_pin: int1 # select either int1 or int2, depending on your choice of wiring
 act_thresh_x: 13
 act_thresh_y: 13
 act_thresh_z: 6 # These all need to be tuned
-speed: 14 # Tune this too. Too fast leads to inaccuracy and increased strain after collision. Too low and it won't trigger.
+speed: 28 # Tune this too. Too fast leads to inaccuracy and increased strain after collision. Too low and it won't trigger.
 z_offset: 0
 samples: 3
 sample_retract_dist: 3 # Too short, and the Z movement won't have accelerated to full speed, leading to inconsistency and potentially failure to trigger
@@ -68,7 +69,7 @@ samples_tolerance: 0.01
 samples_tolerance_retries: 20
 enable_x_homing: True
 enable_y_homing: True
-enable_probe: True
+enable_probe: True	# Set this to false if you don't want to use for the Z axis, e.g. if you have another probe for that.
 log_homing_data: False  # Log accelerometer data to a file
 stepper_enable_dwell_time: 0.1  # Time to dwell after enabling the steppers before homing
 disable_fans: heater_fan hotend_fan # Comma-separated list. Disabling the fans at least leads to better accuracy, and may be needed to avoid false triggering.
@@ -86,6 +87,7 @@ endstop_pin: adxl_probe_x:virtual_endstop
 ... your remaining config ...
 endstop_pin: adxl_probe_y:virtual_endstop
 ```
+If you only want X/Y homing and will be using another probe for Z, then you must set `enable_probe` to `False`.
 
 And to use the ADXL for homing Z, use something like the following and make sure to remove `position_endstop` from your `[stepper_z]` config section:
 ```
@@ -107,7 +109,7 @@ The far better alternative is ACT mode, which detects a bump in the same way, bu
 The `act_thresh` params that this mode takes are in the raw numeric format that the ADXL works with, as you'll probably want to experiment precisely with these. 1 unit of `act_thresh` is "worth" 613.125 units of the older `tap_thresh`. Or in other words, an `act_thresh` of 20 would be equivalent to the original recommended `tap_thresh` value of 12000 mm/s2. Except now, at least for `act_thresh_z`, you can potentially use a value as low as 3 or even 2.
 
 ## Tuning guide
-Try setting this up for just probing, not endstops, at first. You may like to set `act_thresh_z` to something very low like 1 at first to be safe. You can use e.g. `SET_ACCEL_PROBE ACT_THRESH_Z=1` for this and further tuning so you don't have to keep restarting to reload your config file.
+Try setting this up for just probing, not endstops, at first (unless you only want endstops). You may like to set `act_thresh_z` to something very low like 1 at first to be safe. You can use e.g. `SET_ACCEL_PROBE ACT_THRESH_Z=1` for this and further tuning so you don't have to keep restarting to reload your config file.
 
 Use `PROBE_ACCURACY SAMPLES=1` on the console to make the printer try one probing move. Perhaps avoid probing at the outer couple of mm of the bed if yours is like that on the Voron 0 and is only the exact size of the print area - in this step and later ones including when you set up your bed mesh. The vibrational nature of the bump can be more inconsistent at the very edges, or your nozzle could miss your magnetic build surface if it's not perfectly in place.
 
@@ -120,7 +122,7 @@ Next, you'll want to try higher `act_thresh_z` values, to eliminate false trigge
 
 And by now you'll probably also be using `PROBE_ACCURACY SAMPLES=10` or more, to get an idea of the probe's consistency. Standard deviation values under 0.002mm were consistently achievable on my Voron 0. Different `act_thresh_z` values may give slightly different accuracies. You'll also want to cut the fans (the config above should do this automatically), and there may be a slight benefit to reducing Z motor current.
 
-And then you can also tune `speed`. Too low will cause a failure to trigger, depending on your `act_thresh_z` value. Too high, and accuracy will go down as well as your printer receiving more of a knock each time. You can try different speeds and run `PROBE_ACCURACY` to see how they compare. I found 14 to be ideal - as accurate as any lower speeds and still relatively gentle - whereas higher speed quickly reduced accuracy.
+And then you can also tune `speed`. Too low will cause a failure to trigger, depending on your `act_thresh_z` value. Too high, and accuracy will go down as well as your printer receiving more of a knock each time. You can try different speeds and run `PROBE_ACCURACY` to see how they compare. I've mostly used values between 14 and 28. 14 is as accurate as any lower speeds and still relatively gentle - whereas higher speed quickly reduced accuracy (but causes more of a detectable bump).
 
 ## Setting up homing
 In addition to the config file changes outlined above, you will probably want to create a `[homing_override]` script for Klipper which does things like lower accelerations and maybe motor currents before homing. The following script has been created for a Voron 0.2, and is for using the ADXL to home all 3 axes including Z. It should basically also work if some of these axes are not using the ADXL, so long as your Z axis homes in a "negative" direction, i.e. the endstop triggers when your nozzle and bed are close.
