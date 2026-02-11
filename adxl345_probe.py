@@ -132,6 +132,7 @@ class ADXL345Probe:
         else: # "act" mode
             self.int_reg_value = 0x10
 
+        self.rest_time = config.getfloat("rest_time", 0.5, minval=0, maxval=10)
         self.position_endstop = config.getfloat("z_offset")
         self.disable_fans = [
             fan.strip() for fan in config.get("disable_fans", "").split(",") if fan
@@ -370,16 +371,17 @@ class ADXL345Probe:
         self.activate_gcode.run_gcode_from_command()
         toolhead = self.printer.lookup_object("toolhead")
         toolhead.flush_step_generation()
-        toolhead.dwell(ADXL345_REST_TIME)
+        if self.rest_time:
+            toolhead.dwell(self.rest_time) #ADXL345_REST_TIME)
         print_time = toolhead.get_last_move_time()
         clock = self.adxl345.mcu.print_time_to_clock(print_time)
-        chip.set_reg(REG_INT_ENABLE, 0x00, minclock=clock) # If we could only get rid of the minclock=clock, sometimes it goes wicked-fast! But sometimes ends up "triggered prior to movement".
-        chip.read_reg(REG_INT_SOURCE)
-        chip.set_reg(REG_INT_ENABLE, self.int_reg_value) # Enables either TAP or ACT
+        chip.set_reg(REG_INT_ENABLE, 0x00) # If we could only get rid of the minclock=clock, sometimes it goes wicked-fast! But sometimes ends up "triggered prior to movement".
+        #chip.read_reg(REG_INT_SOURCE)
         if not self._try_clear_int():
             raise self.printer.command_error(
                 "ADXL345 triggered before move, it may be set too sensitive."
             )
+        chip.set_reg(REG_INT_ENABLE, self.int_reg_value, minclock=clock) # Enables either TAP or ACT
             
     def probe_finish(self, hmove, axis="z"): # We want this function to run and finish as quickly as possible, so the probe can be pulled up away from the bed.
         chip = self.adxl345
@@ -388,8 +390,7 @@ class ADXL345Probe:
         #print_time = toolhead.get_last_move_time()
         #clock = chip.mcu.print_time_to_clock(print_time)
         #chip.set_reg(REG_INT_ENABLE, 0x00, minclock=clock) # This one slows it down a whole lot! We can leave this out so long as we only call init_adxl() once per multi-probe.
-        self.deactivate_gcode.run_gcode_from_command()
-
+        #self.deactivate_gcode.run_gcode_from_command()
         if not self._in_multi_probe:
             chip.set_reg(adxl345.REG_POWER_CTL, 0x00)
             if axis == "z": # Fans were only automatically disabled for Z
