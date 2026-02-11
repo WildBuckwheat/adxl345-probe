@@ -270,6 +270,8 @@ class ADXL345Probe:
             elif axis == "y":
                 act_thresh = self.act_thresh_y
             else: # z or none
+                if not self.enable_probe:
+                    return;
                 act_thresh = self.act_thresh_z
             chip.set_reg(REG_ACT_INACT_CTL, 0xF0) # AC mode (cancels out gravity), and enable all 3 axes.
             chip.set_reg(REG_THRESH_ACT, int(act_thresh))
@@ -339,7 +341,10 @@ class ADXL345Probe:
         return self.probe_offsets.get_offsets(gcmd)
 
     def get_status(self, eventtime):
-        return self.cmd_helper.get_status(eventtime)
+        if self.enable_probe:
+            return self.cmd_helper.get_status(eventtime)
+        else:
+            return {'name': 'adxl_probe'} # Not sure what else we should be putting here?
 
     def start_probe_session(self, gcmd):
         return self.probe_session.start_probe_session(gcmd)
