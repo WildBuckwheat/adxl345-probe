@@ -130,7 +130,6 @@ class ADXL345Probe:
             self.int_reg_value = 0x10
 
         self.rest_time = config.getfloat("rest_time", 0.5, minval=0, maxval=10)
-        self.position_endstop = config.getfloat("z_offset")
         self.disable_fans = [
             fan.strip() for fan in config.get("disable_fans", "").split(",") if fan
         ]
@@ -327,9 +326,6 @@ class ADXL345Probe:
 
     def probing_move(self, pos, speed):
         +        return self.phoming.probing_move(self, pos, speed, check_movement=False)
-
-    def get_position_endstop(self):
-        return self.position_endstop
 
     def get_probe_params(self, gcmd=None):
         return self.param_helper.get_probe_params(gcmd)
