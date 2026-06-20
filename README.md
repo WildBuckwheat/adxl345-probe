@@ -1,4 +1,4 @@
-# This fork of the two upstream repos adds the ability to use the ADXL345's ACT mode, which allows far better sensitivity than TAP.
+# This fork of the three upstream repos fixes compatibility with klipper's new HomingViaProbeHelper() method.
 
 [![CC BY-NC-SA 4.0][cc-by-nc-sa-shield]][cc-by-nc-sa]
 
@@ -26,7 +26,7 @@ Force on the bed was measured using a standard kitchen scale, this was approxima
 
 ```bash
 cd $HOME
-git clone https://github.com/3d-olympics/adxl345-probe
+git clone https://github.com/WildBuckwheat/adxl345-probe
 cd adxl345-probe
 ./scripts/install.sh
 ```
