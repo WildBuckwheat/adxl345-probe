@@ -89,7 +89,7 @@ class ADXL345Endstop:
 
 
 class ADXL345Probe:
-    def __init__(self, config):
+    def __init__(self, config, probe_offsets, param_helper):
         self.config = config
         self.printer = config.get_printer()
         gcode_macro = self.printer.load_object(config, "gcode_macro")
@@ -187,7 +187,7 @@ class ADXL345Probe:
             self.cmd_helper = probe.ProbeCommandHelper(config, self, self.query_endstop)
             self.probe_offsets = probe.ProbeOffsetsHelper(config)
             self.param_helper = probe.ProbeParameterHelper(config)
-            self.homing_helper = probe.DescendToEndstopHelper(config, self, self.probe_offsets, self.param_helper)
+            self.homing_helper = probe.DescendToEndstopHelper(config, self, self.probe_offsets, self.param_helper, always_check_movement=False)
             self.probe_session = probe.ProbeSessionHelper(config, self.param_helper, self.homing_helper.start_probe_session)
             self.printer.add_object("probe", self)
 
@@ -325,19 +325,7 @@ class ADXL345Probe:
         self._in_multi_probe = False
 
     def probing_move(self, pos, speed):
-        +        return self.phoming.probing_move(self, pos, speed, check_movement=False)
-
-    def get_probe_params(self, gcmd=None):
-        return self.param_helper.get_probe_params(gcmd)
-
-    def get_offsets(self, gcmd=None):
-        return self.probe_offsets.get_offsets(gcmd)
-
-    def get_status(self, eventtime):
-        if self.enable_probe:
-            return self.cmd_helper.get_status(eventtime)
-        else:
-            return {'name': 'adxl_probe'} # Not sure what else we should be putting here?
+        return self.phoming.probing_move(self, pos, speed, check_movement=False)
 
     def start_probe_session(self, gcmd):
         return self.probe_session.start_probe_session(gcmd)
@@ -475,6 +463,28 @@ class ADXL345Probe:
 
         self._control_fans(disable=False)
 
+ 
+# Main external probe interface
+class PrinterADXL345:
+    def __init__(self, config):
+        self.printer = config.get_printer()
+        self.probe_offsets = probe.ProbeOffsetsHelper(config)
+        self.param_helper = probe.ProbeParameterHelper(config)
+        self.mcu_probe = ADXL345Probe(config, self.probe_offsets, self.param_helper)
+        self.probe_session = probe.SampleAveragingHelper(config, self.param_helper, self.mcu_probe.start_probe_session)
+        query_endstop = self.mcu_probe.query_endstop
+        self.cmd_helper = probe.ProbeCommandHelper(config, self, self.mcu_probe.query_endstop)
+        probe.HomingViaProbeHelper(config, self.probe_offsets.get_offsets()[2], query_endstop)
+    def get_probe_params(self, gcmd=None):
+        return self.param_helper.get_probe_params(gcmd)
+    def get_offsets(self, gcmd=None):
+        return self.probe_offsets.get_offsets(gcmd)
+    def get_status(self, eventtime):
+        return self.cmd_helper.get_status(eventtime)
+    def start_probe_session(self, gcmd):
+        return self.probe_session.start_probe_session(gcmd)
 
 def load_config(config):
-    return ADXL345Probe(config)
+    adxl = PrinterADXL345(config)
+    config.get_printer().add_object('probe', adxl)
+    return adxl
