@@ -76,10 +76,13 @@ class ADXL345Endstop:
             return
 
         if self.adxl345probe.log_homing_data:
-            self.aclient.finish_measurements()
-            raw_name = self._get_filename()
-            self.aclient.write_to_file(raw_name)
-            self.gcode.respond_info("Writing homing data to %s file" % raw_name)
+            if self.aclient is not None:
+                self.aclient.finish_measurements()
+                raw_name = self._get_filename()
+                self.aclient.write_to_file(raw_name)
+                self.gcode.respond_info("Writing homing data to %s file" % raw_name)
+            else:
+                raise Exception("aclient is set to None. This should never happen.")
         self.adxl345probe.probe_finish(axis=self.axis)
 
     def _get_filename(self):
