@@ -188,7 +188,7 @@ class ADXL345Probe:
             self.cmd_helper = probe.ProbeCommandHelper(config, self, self.query_endstop)
             self.probe_offsets = probe.ProbeOffsetsHelper(config)
             self.param_helper = probe.ProbeParameterHelper(config)
-            self.homing_helper = probe.HomingViaProbeHelper(config, self, self.probe_offsets, self.param_helper)
+            self.homing_helper = probe.DescendToEndstopHelper(config, self, self.probe_offsets, self.param_helper)
             self.probe_session = probe.ProbeSessionHelper(config, self.param_helper, self.homing_helper.start_probe_session)
             self.printer.add_object("probe", self)
 
