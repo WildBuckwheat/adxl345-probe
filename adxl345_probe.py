@@ -145,7 +145,6 @@ class ADXL345Probe:
         self.mcu_endstop_y = mcu.setup_pin("endstop", pin_params)
         self.enable_x_homing = config.getboolean("enable_x_homing", False)
         self.enable_y_homing = config.getboolean("enable_y_homing", False)
-        self.enable_probe = config.getboolean("enable_probe", True)
         self.log_homing_data = config.getboolean("log_homing_data", False)
         self.stepper_enable_dwell_time = config.getfloat(
             "stepper_enable_dwell_time", 0.1
@@ -183,25 +182,19 @@ class ADXL345Probe:
             None,
             self.cmd_ACCELEROMETER_NOISE,
         )
-        if self.enable_probe:
-            self.cmd_helper = probe.ProbeCommandHelper(config, self, self.query_endstop)
-            self.probe_offsets = probe.ProbeOffsetsHelper(config)
-            self.param_helper = probe.ProbeParameterHelper(config)
-            self.homing_helper = probe.DescendToEndstopHelper(config, self, self.probe_offsets, self.param_helper, always_check_movement=False)
-            self.probe_session = probe.ProbeSessionHelper(config, self.param_helper, self.homing_helper.start_probe_session)
-            self.printer.add_object("probe", self)
+        self.homing_helper = probe.DescendToEndstopHelper(config, self, probe_offsets, param_helper, always_check_movement=False)
 
-            if self.mode == "tap":
-                self.tap_thresh_z = config.getfloat(
-                    "tap_thresh_z", self.tap_thresh, minval=TAP_SCALE, maxval=100000.0
-                )
-                self.tap_dur_z = config.getfloat(
-                    "tap_dur_z", self.tap_dur, above=DUR_SCALE, maxval=0.1
-                )
-            else: # "act" mode
-                self.act_thresh_z = config.getfloat(
-                    "act_thresh_z", minval=1, maxval=255
-                )
+        if self.mode == "tap":
+            self.tap_thresh_z = config.getfloat(
+                "tap_thresh_z", self.tap_thresh, minval=TAP_SCALE, maxval=100000.0
+            )
+            self.tap_dur_z = config.getfloat(
+                "tap_dur_z", self.tap_dur, above=DUR_SCALE, maxval=0.1
+            )
+        else: # "act" mode
+            self.act_thresh_z = config.getfloat(
+                "act_thresh_z", minval=1, maxval=255
+            )
 
         if self.enable_x_homing:
             x_endstop = ADXL345Endstop(self, "x")
@@ -266,8 +259,6 @@ class ADXL345Probe:
             elif axis == "y":
                 act_thresh = self.act_thresh_y
             else: # z or none
-                if not self.enable_probe:
-                    return;
                 act_thresh = self.act_thresh_z
             chip.set_reg(REG_ACT_INACT_CTL, 0xF0) # AC mode (cancels out gravity), and enable all 3 axes.
             chip.set_reg(REG_THRESH_ACT, int(act_thresh))
