@@ -10,12 +10,9 @@ REG_INT_MAP = 0x2F
 REG_TAP_AXES = 0x2A
 REG_INT_ENABLE = 0x2E
 REG_INT_SOURCE = 0x30
-
 DUR_SCALE = 0.000625  # 0.625 msec / LSB
 TAP_SCALE = 0.0625 * adxl345.FREEFALL_ACCEL  # 62.5mg/LSB * Earth gravity in mm/s**2
-
 ADXL345_REST_TIME = 0.1
-
 REG_OFSX = 0x1E
 REG_OFSY = 0x1F
 REG_OFSZ = 0x20
@@ -72,7 +69,7 @@ class ADXL345Endstop:
         if self.adxl345probe.log_homing_data:
             self.aclient = self.adxl345probe.adxl345.start_internal_client()
 
-        self.adxl345probe.probe_prepare(hmove, axis=self.axis)
+        self.adxl345probe.probe_prepare(axis=self.axis)
 
     def handle_homing_move_end(self, hmove, axis=None):
         if self.mcu_endstop not in hmove.get_mcu_endstops() or axis != self.axis:
@@ -83,7 +80,7 @@ class ADXL345Endstop:
             raw_name = self.get_filename()
             self.aclient.write_to_file(raw_name)
             self.gcode.respond_info("Writing homing data to %s file" % raw_name)
-        self.adxl345probe.probe_finish(hmove, axis=self.axis)
+        self.adxl345probe.probe_finish(axis=self.axis)
 
     def get_filename(self):
         name = "adxl_homing-"
@@ -359,7 +356,7 @@ class ADXL345Probe:
             tries -= 1
         return False
         
-    def probe_prepare(self, hmove, axis="z"):
+    def probe_prepare(self, axis="z"):
         chip = self.adxl345
 
         # We don't switch the fans off before homing X and Y because we don't need such sensitivity that the fans would cause any problems.
@@ -388,7 +385,7 @@ class ADXL345Probe:
             )
         chip.set_reg(REG_INT_ENABLE, self.int_reg_value, minclock=clock) # Enables either TAP or ACT
             
-    def probe_finish(self, hmove, axis="z"): # We want this function to run and finish as quickly as possible, so the probe can be pulled up away from the bed.
+    def probe_finish(self, axis="z"): # We want this function to run and finish as quickly as possible, so the probe can be pulled up away from the bed.
         chip = self.adxl345
         toolhead = self.printer.lookup_object("toolhead")
         #toolhead.dwell(ADXL345_REST_TIME)
