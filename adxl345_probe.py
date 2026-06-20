@@ -320,7 +320,7 @@ class ADXL345Probe:
         return self.homing_helper.pull_trigger_positions()
 
     def end_probe_session(self):
-        self.home_start.clear_trigger_positions()
+        self.homing_helper.clear_trigger_positions()
         self._control_fans(disable=False)
         chip = self.adxl345
         chip.set_reg(adxl345.REG_POWER_CTL, 0x00)
