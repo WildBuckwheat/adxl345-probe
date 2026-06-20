@@ -41,11 +41,11 @@ class ADXL345Endstop:
         # Setup for sensorless homing
         self.printer.register_event_handler(
             "homing:homing_move_begin",
-            lambda hmove: self.handle_homing_move_begin(hmove, self.axis),
+            lambda hmove: self._handle_homing_move_begin(hmove, self.axis),
         )
         self.printer.register_event_handler(
             "homing:homing_move_end",
-            lambda hmove: self.handle_homing_move_end(hmove, self.axis),
+            lambda hmove: self._handle_homing_move_end(hmove, self.axis),
         )
         if self.axis == "x":
             self.mcu_endstop = self.adxl345probe.mcu_endstop_x
@@ -53,7 +53,7 @@ class ADXL345Endstop:
             self.mcu_endstop = self.adxl345probe.mcu_endstop_y
         return self.mcu_endstop
 
-    def handle_homing_move_begin(self, hmove, axis=None):
+    def _handle_homing_move_begin(self, hmove, axis=None):
         if self.mcu_endstop not in hmove.get_mcu_endstops() or axis != self.axis:
             return
 
@@ -65,24 +65,24 @@ class ADXL345Endstop:
             self.adxl345probe.stepper_enable_dwell_time # TODO: only dwell if the stepper was not already enabled.
         )
 
-        self.adxl345probe.init_adxl(self.axis)
+        self.adxl345probe._init_adxl(self.axis)
         if self.adxl345probe.log_homing_data:
             self.aclient = self.adxl345probe.adxl345.start_internal_client()
 
         self.adxl345probe.probe_prepare(axis=self.axis)
 
-    def handle_homing_move_end(self, hmove, axis=None):
+    def _handle_homing_move_end(self, hmove, axis=None):
         if self.mcu_endstop not in hmove.get_mcu_endstops() or axis != self.axis:
             return
 
         if self.adxl345probe.log_homing_data:
             self.aclient.finish_measurements()
-            raw_name = self.get_filename()
+            raw_name = self._get_filename()
             self.aclient.write_to_file(raw_name)
             self.gcode.respond_info("Writing homing data to %s file" % raw_name)
         self.adxl345probe.probe_finish(axis=self.axis)
 
-    def get_filename(self):
+    def _get_filename(self):
         name = "adxl_homing-"
         time = datetime.datetime.now()
         return os.path.join("/tmp", name + time.strftime("%Y-%m-%d_%H:%M:%S") + ".csv")
@@ -233,12 +233,12 @@ class ADXL345Probe:
                 self.act_thresh_y = config.getfloat(
                     "act_thresh_y", minval=1, maxval=255
                 )
-        self.printer.register_event_handler("klippy:connect", self.init_adxl)
+        self.printer.register_event_handler("klippy:connect", self._init_adxl)
         self.printer.register_event_handler(
-            "klippy:mcu_identify", self.handle_mcu_identify
+            "klippy:mcu_identify", self._handle_mcu_identify
         )
 
-    def init_adxl(self, axis=None):
+    def _init_adxl(self, axis=None):
         chip = self.adxl345
         chip.set_reg(adxl345.REG_POWER_CTL, 0x00)
         chip.set_reg(adxl345.REG_DATA_FORMAT, 0x0B)
@@ -272,7 +272,7 @@ class ADXL345Probe:
             chip.set_reg(REG_ACT_INACT_CTL, 0xF0) # AC mode (cancels out gravity), and enable all 3 axes.
             chip.set_reg(REG_THRESH_ACT, int(act_thresh))
 
-    def handle_mcu_identify(self):
+    def _handle_mcu_identify(self):
         self.phoming = self.printer.lookup_object("homing")
         kin = self.printer.lookup_object("toolhead").get_kinematics()
         for stepper in kin.get_steppers():
@@ -286,12 +286,12 @@ class ADXL345Probe:
                 self.add_stepper(stepper, "y")
                 self.mcu_endstop_y.add_stepper(stepper)
                 
-    def possibly_wait_for_fan_to_stop(self, delay_if_necessary):
+    def _possibly_wait_for_fan_to_stop(self, delay_if_necessary):
         if delay_if_necessary:
             toolhead = self.printer.lookup_object("toolhead")
             toolhead.dwell(2.5)
 
-    def control_fans(self, disable=True, delay_if_necessary=False):
+    def _control_fans(self, disable=True, delay_if_necessary=False):
         self.printer.lookup_object("gcode").respond_info("control fans")
         for fan in self.disable_fans:
             fan = self.printer.lookup_object(fan)
@@ -301,7 +301,7 @@ class ADXL345Probe:
                 if disable:
                     if fan.fan_speed != 0: # Unfortunately, even if the fan isn't moving, i.e. the heater is off, this will still read as 1.0. It's only if we've already set it to 0 here previously that we can avoid adding the delay.
                         fan.fan_speed = 0
-                        self.possibly_wait_for_fan_to_stop(delay_if_necessary)
+                        self._possibly_wait_for_fan_to_stop(delay_if_necessary)
                 else:
                     fan.fan_speed = fan._fan_speed
             elif hasattr(fan, "target_temp"): # For temperature_fans
@@ -309,17 +309,17 @@ class ADXL345Probe:
                     if (fan.target_temp != fan.max_temp):
                         fan._target_temp = fan.target_temp
                         fan.target_temp = fan.max_temp
-                        self.possibly_wait_for_fan_to_stop(delay_if_necessary)
+                        self._possibly_wait_for_fan_to_stop(delay_if_necessary)
                 else:
                     fan.target_temp = fan._target_temp
 
     def multi_probe_begin(self):
         self._in_multi_probe = True
         self._done_init_for_multi_probe_yet = False
-        self.control_fans(disable=True, delay_if_necessary=True)
+        self._control_fans(disable=True, delay_if_necessary=True)
 
     def multi_probe_end(self):
-        self.control_fans(disable=False)
+        self._control_fans(disable=False)
         chip = self.adxl345
         chip.set_reg(adxl345.REG_POWER_CTL, 0x00)
         self._in_multi_probe = False
@@ -358,10 +358,10 @@ class ADXL345Probe:
         # We don't switch the fans off before homing X and Y because we don't need such sensitivity that the fans would cause any problems.
         # If do you want to, e.g. to make sure the fans have stopped spinning before the Z probing, you can use HOTEND_FAN_OFF in your g-code.
         if axis=="z":
-            self.control_fans(disable=True, delay_if_necessary=(axis=="z"))
+            self._control_fans(disable=True, delay_if_necessary=(axis=="z"))
             
         if not self._in_multi_probe or not self._done_init_for_multi_probe_yet:
-            self.init_adxl(axis)    # We only want to do one init_adxl() per multi-probe - otherwise, it gets tripped up when other corners are cut to increase speed.
+            self._init_adxl(axis)    # We only want to do one init_adxl() per multi-probe - otherwise, it gets tripped up when other corners are cut to increase speed.
                                     # But we can't do this in multi_probe_begin() because we don't know the axis yet there - even though surely it's always gotta be z.
             chip.set_reg(adxl345.REG_POWER_CTL, 0x08)
             self._done_init_for_multi_probe_yet = True
@@ -392,7 +392,7 @@ class ADXL345Probe:
         if not self._in_multi_probe:
             chip.set_reg(adxl345.REG_POWER_CTL, 0x00)
             if axis == "z": # Fans were only automatically disabled for Z
-                self.control_fans(disable=False)
+                self._control_fans(disable=False)
 
     def add_stepper(self, stepper, axis=None):
         if axis is not None:
@@ -437,13 +437,13 @@ class ADXL345Probe:
             )
 
     def cmd_HOTEND_FAN_OFF(self, gcmd):
-        self.control_fans(disable=True)
+        self._control_fans(disable=True)
 
     def cmd_HOTEND_FAN_ON(self, gcmd):
-        self.control_fans(disable=False)
+        self._control_fans(disable=False)
 
     def cmd_ACCELEROMETER_NOISE(self, gcmd):
-        self.control_fans(disable=True, delay_if_necessary=True)
+        self._control_fans(disable=True, delay_if_necessary=True)
         chip = self.adxl345
         # Sorry, I don't really know what I'm doing here - this could surely be done much faster.
         the_sum = 0
@@ -455,7 +455,7 @@ class ADXL345Probe:
             aclient.finish_measurements()
             values = aclient.get_samples()
             if not values:
-                self.control_fans(disable=False)
+                self._control_fans(disable=False)
                 raise gcmd.error("No accelerometer measurements found")
             _, accel_x, accel_y, accel_z = values[-1]
             the_sum += accel_z
@@ -473,7 +473,7 @@ class ADXL345Probe:
         gcmd.respond_info("sd: %.6f"
                           % (sd))
 
-        self.control_fans(disable=False)
+        self._control_fans(disable=False)
 
 
 def load_config(config):
