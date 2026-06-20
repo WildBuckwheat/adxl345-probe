@@ -307,12 +307,20 @@ class ADXL345Probe:
                 else:
                     fan.target_temp = fan._target_temp
 
-    def multi_probe_begin(self):
-        self._in_multi_probe = True
-        self._done_init_for_multi_probe_yet = False
-        self._control_fans(disable=True, delay_if_necessary=True)
+    def run_probe(self, gcmd):
+        self._probe_prepare()
+        try:
+            self.homing_helper.descend_until_trigger(gcmd)
+        except self.printer.command_error as e:
+            self._probe_finish()
+            raise Exception("error: {}".format(e))
+        self._probe_finish()
+    
+    def pull_probed_results(self):
+        return self.homing_helper.pull_trigger_positions()
 
-    def multi_probe_end(self):
+    def end_probe_session(self):
+        self.home_start.clear_trigger_positions()
         self._control_fans(disable=False)
         chip = self.adxl345
         chip.set_reg(adxl345.REG_POWER_CTL, 0x00)
@@ -322,7 +330,11 @@ class ADXL345Probe:
         return self.phoming.probing_move(self, pos, speed, check_movement=False)
 
     def start_probe_session(self, gcmd):
-        return self.probe_session.start_probe_session(gcmd)
+        self.homing_helper.clear_trigger_positions()
+        self._in_multi_probe = True
+        self._done_init_for_multi_probe_yet = False
+        self._control_fans(disable=True, delay_if_necessary=True)
+        return self
 
     def _try_clear_int(self):
         chip = self.adxl345
@@ -334,7 +346,7 @@ class ADXL345Probe:
             tries -= 1
         return False
         
-    def probe_prepare(self, axis="z"):
+    def _probe_prepare(self, axis="z"):
         chip = self.adxl345
 
         # We don't switch the fans off before homing X and Y because we don't need such sensitivity that the fans would cause any problems.
@@ -363,10 +375,10 @@ class ADXL345Probe:
             )
         chip.set_reg(REG_INT_ENABLE, self.int_reg_value, minclock=clock) # Enables either TAP or ACT
             
-    def probe_finish(self, axis="z"): # We want this function to run and finish as quickly as possible, so the probe can be pulled up away from the bed.
+    def _probe_finish(self, axis="z"): # We want this function to run and finish as quickly as possible, so the probe can be pulled up away from the bed.
         chip = self.adxl345
         toolhead = self.printer.lookup_object("toolhead")
-        #toolhead.dwell(ADXL345_REST_TIME)
+        toolhead.dwell(ADXL345_REST_TIME)
         #print_time = toolhead.get_last_move_time()
         #clock = chip.mcu.print_time_to_clock(print_time)
         #chip.set_reg(REG_INT_ENABLE, 0x00, minclock=clock) # This one slows it down a whole lot! We can leave this out so long as we only call init_adxl() once per multi-probe.
