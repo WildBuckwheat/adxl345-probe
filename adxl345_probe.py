@@ -326,7 +326,7 @@ class ADXL345Probe:
         self._in_multi_probe = False
 
     def probing_move(self, pos, speed):
-        return self.phoming.probing_move(self, pos, speed)
+        +        return self.phoming.probing_move(self, pos, speed, check_movement=False)
 
     def get_position_endstop(self):
         return self.position_endstop
