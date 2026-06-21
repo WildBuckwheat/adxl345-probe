@@ -120,7 +120,6 @@ class ADXL345Probe:
         pin_params = ppins.lookup_pin(probe_pin, can_invert=True, can_pullup=True)
         mcu = pin_params["chip"]
         self.mcu_endstop_z = mcu.setup_pin("endstop", pin_params)
-
         self.log_homing_data = config.getboolean("log_homing_data", False)
         self.stepper_enable_dwell_time = config.getfloat(
             "stepper_enable_dwell_time", 0.1
@@ -165,7 +164,6 @@ class ADXL345Probe:
             "act_thresh_z", minval=1, maxval=255
         )
 
-
         self.printer.register_event_handler("klippy:connect", self._init_adxl)
         self.printer.register_event_handler(
             "klippy:mcu_identify", self._handle_mcu_identify
@@ -180,12 +178,8 @@ class ADXL345Probe:
         chip.set_reg(REG_INT_MAP, self.int_map)
 
         # "act" mode
-        if axis == "x":
-            act_thresh = self.act_thresh_x
-        elif axis == "y":
-            act_thresh = self.act_thresh_y
-        else: # z or none
-            act_thresh = self.act_thresh_z
+        # z or none
+        act_thresh = self.act_thresh_z
         chip.set_reg(REG_ACT_INACT_CTL, 0xF0) # AC mode (cancels out gravity), and enable all 3 axes.
         chip.set_reg(REG_THRESH_ACT, int(act_thresh))
 
@@ -196,7 +190,7 @@ class ADXL345Probe:
             if stepper.is_active_axis("z"): # Multiple ones of these can be true, i.e. a motor might have a part in multiple axes in a core-xy or delta printer.
                 self.add_stepper(stepper, "z")
                 self.mcu_endstop_z.add_stepper(stepper)
-
+                
     def _possibly_wait_for_fan_to_stop(self, delay_if_necessary):
         if delay_if_necessary:
             toolhead = self.printer.lookup_object("toolhead")
