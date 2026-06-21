@@ -39,10 +39,6 @@ class ADXL345Endstop:
             "homing:homing_move_end",
             lambda hmove: self._handle_homing_move_end(hmove, self.axis),
         )
-        if self.axis == "x":
-            self.mcu_endstop = self.adxl345probe.mcu_endstop_x
-        elif self.axis == "y":
-            self.mcu_endstop = self.adxl345probe.mcu_endstop_y
         return self.mcu_endstop
 
     def _handle_homing_move_begin(self, hmove, axis=None):
