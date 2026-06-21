@@ -120,10 +120,7 @@ class ADXL345Probe:
         pin_params = ppins.lookup_pin(probe_pin, can_invert=True, can_pullup=True)
         mcu = pin_params["chip"]
         self.mcu_endstop_z = mcu.setup_pin("endstop", pin_params)
-        self.mcu_endstop_x = mcu.setup_pin("endstop", pin_params)
-        self.mcu_endstop_y = mcu.setup_pin("endstop", pin_params)
-        self.enable_x_homing = config.getboolean("enable_x_homing", False)
-        self.enable_y_homing = config.getboolean("enable_y_homing", False)
+
         self.log_homing_data = config.getboolean("log_homing_data", False)
         self.stepper_enable_dwell_time = config.getfloat(
             "stepper_enable_dwell_time", 0.1
@@ -168,23 +165,7 @@ class ADXL345Probe:
             "act_thresh_z", minval=1, maxval=255
         )
 
-        if self.enable_x_homing:
-            x_endstop = ADXL345Endstop(self, "x")
-            ppins.register_chip("adxl_probe_x", x_endstop)
 
-            # "act" mode
-            self.act_thresh_x = config.getfloat(
-                "act_thresh_x", minval=1, maxval=255
-            )
-        if self.enable_y_homing:
-            y_endstop = ADXL345Endstop(self, "y")
-            ppins.register_chip("adxl_probe_y", y_endstop)
-
-
-            # "act" mode
-            self.act_thresh_y = config.getfloat(
-                "act_thresh_y", minval=1, maxval=255
-            )
         self.printer.register_event_handler("klippy:connect", self._init_adxl)
         self.printer.register_event_handler(
             "klippy:mcu_identify", self._handle_mcu_identify
@@ -215,13 +196,7 @@ class ADXL345Probe:
             if stepper.is_active_axis("z"): # Multiple ones of these can be true, i.e. a motor might have a part in multiple axes in a core-xy or delta printer.
                 self.add_stepper(stepper, "z")
                 self.mcu_endstop_z.add_stepper(stepper)
-            if stepper.is_active_axis("x"):
-                self.add_stepper(stepper, "x")
-                self.mcu_endstop_x.add_stepper(stepper)
-            if stepper.is_active_axis("y"):
-                self.add_stepper(stepper, "y")
-                self.mcu_endstop_y.add_stepper(stepper)
-                
+
     def _possibly_wait_for_fan_to_stop(self, delay_if_necessary):
         if delay_if_necessary:
             toolhead = self.printer.lookup_object("toolhead")
