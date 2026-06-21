@@ -11,74 +11,6 @@ ADXL345_REST_TIME = 0.1
 REG_THRESH_ACT = 0x24
 REG_ACT_INACT_CTL  = 0x27
 
-class ADXL345Endstop:
-    def __init__(self, adxl345probe, axis=None):
-        self.adxl345probe = adxl345probe
-        self.printer = adxl345probe.printer
-        self.axis = axis
-        self.mcu_endstop = None
-        self.stepper_enable = self.printer.load_object(
-            self.adxl345probe.config, "stepper_enable"
-        )
-        self.gcode = self.printer.lookup_object("gcode")
-        self.aclient = None
-
-    def setup_pin(self, pin_type, pin_params):
-        # Validate pin
-        ppins = self.printer.lookup_object("pins")
-        if pin_type != "endstop" or pin_params["pin"] != "virtual_endstop":
-            raise ppins.error("probe virtual endstop only useful as endstop")
-        if pin_params["invert"] or pin_params["pullup"]:
-            raise ppins.error("Can not pullup/invert tmc virtual pin")
-        # Setup for sensorless homing
-        self.printer.register_event_handler(
-            "homing:homing_move_begin",
-            lambda hmove: self._handle_homing_move_begin(hmove, self.axis),
-        )
-        self.printer.register_event_handler(
-            "homing:homing_move_end",
-            lambda hmove: self._handle_homing_move_end(hmove, self.axis),
-        )
-        return self.mcu_endstop
-
-    def _handle_homing_move_begin(self, hmove, axis=None):
-        if self.mcu_endstop not in hmove.get_mcu_endstops() or axis != self.axis:
-            return
-
-        for stepper in self.adxl345probe.get_steppers(self.axis):
-            #self.gcode.respond_info(stepper.get_name())
-            self.stepper_enable.set_motors_enable([stepper.get_name()], True)
-            
-        self.printer.lookup_object("toolhead").dwell(
-            self.adxl345probe.stepper_enable_dwell_time # TODO: only dwell if the stepper was not already enabled.
-        )
-
-        self.adxl345probe._init_adxl(self.axis)
-        if self.adxl345probe.log_homing_data:
-            self.aclient = self.adxl345probe.adxl345.start_internal_client()
-
-        self.adxl345probe.probe_prepare(axis=self.axis)
-
-    def _handle_homing_move_end(self, hmove, axis=None):
-        if self.mcu_endstop not in hmove.get_mcu_endstops() or axis != self.axis:
-            return
-
-        if self.adxl345probe.log_homing_data:
-            if self.aclient is not None:
-                self.aclient.finish_measurements()
-                raw_name = self._get_filename()
-                self.aclient.write_to_file(raw_name)
-                self.gcode.respond_info("Writing homing data to %s file" % raw_name)
-            else:
-                raise Exception("aclient is set to None. This should never happen.")
-        self.adxl345probe.probe_finish(axis=self.axis)
-
-    def _get_filename(self):
-        name = "adxl_homing-"
-        time = datetime.datetime.now()
-        return os.path.join("/tmp", name + time.strftime("%Y-%m-%d_%H:%M:%S") + ".csv")
-
-
 class ADXL345Probe:
     def __init__(self, config, probe_offsets, param_helper):
         self.config = config
@@ -111,6 +43,8 @@ class ADXL345Probe:
         
         self.adxl345 = self.printer.lookup_object(adxl345_name)
         self.next_cmd_time = self.action_end_time = 0.0
+        
+        
         # Create an "endstop" object to handle the sensor pin
         ppins = self.printer.lookup_object("pins")
         pin_params = ppins.lookup_pin(probe_pin, can_invert=True, can_pullup=True)
@@ -126,6 +60,8 @@ class ADXL345Probe:
         self.home_start = self.mcu_endstop_z.home_start
         self.home_wait = self.mcu_endstop_z.home_wait
         self.query_endstop = self.mcu_endstop_z.query_endstop
+
+
         # Register commands and callbacks
         self.gcode = self.printer.lookup_object("gcode")
         self.gcode.register_mux_command(
