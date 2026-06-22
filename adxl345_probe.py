@@ -1,123 +1,84 @@
 from . import probe, adxl345
 
+# ADXL345 register addresses
 REG_INT_MAP = 0x2F
 REG_INT_ENABLE = 0x2E
 REG_INT_SOURCE = 0x30
-ADXL345_REST_TIME = 0.1
 REG_THRESH_ACT = 0x24
-REG_ACT_INACT_CTL  = 0x27
+REG_ACT_INACT_CTL = 0x27
 
+ADXL345_REST_TIME = 0.1
+
+Commands = {'SET_ACCEL_PROBE: 1'}
+
+# ADXL "endstop" wrapper
 class ADXL345Probe:
     def __init__(self, config, probe_offsets, param_helper):
         self.printer = config.get_printer()
-
-
-
-
-        
-        gcode_macro = self.printer.load_object(config, "gcode_macro")
-        self.activate_gcode = gcode_macro.load_template(config, "activate_gcode", "")
-        self.deactivate_gcode = gcode_macro.load_template(config, "deactivate_gcode", "")
-        int_pin = config.get("int_pin").strip()
-        self.inverted = False
-        self.is_measuring = False
-        self._in_multi_probe = False
-        if int_pin.startswith("!"):
-            self.inverted = True
-            int_pin = int_pin[1:].strip()
-        if int_pin != "int1" and int_pin != "int2":
-            raise config.error("int_pin must specify one of int1 or int2 pins")
-        probe_pin = config.get("probe_pin")
         adxl345_name = config.get("chip", "adxl345")
-        self.int_map = 0x40 if int_pin == "int2" else 0x0
-        
-        # "act" mode
-        self.int_reg_value = 0x10
-
-        self.rest_time = config.getfloat("rest_time", 0.5, minval=0, maxval=10)
-        self.disable_fans = [fan.strip() for fan in config.get("disable_fans", "").split(",") if fan]
-        
         self.adxl345 = self.printer.lookup_object(adxl345_name)
-        self.next_cmd_time = self.action_end_time = 0.0
-        
+
+        # get variables from .cfg
+        # zzz change act_thresh_z to thresh_act to match adxl datasheet. 8 bits unsigned. The scale factor is 62.5 mg/LSB. A value of 0 may result in undesirable behavior if the activity interrupt is enabled
+        # zzz should validate that it's an int?
+        self.act_thresh_z = config.getfloat("act_thresh_z", minval=1, maxval=255)
         
         # Create an "endstop" object to handle the sensor pin
-        ppins = self.printer.lookup_object("pins")
-        pin_params = ppins.lookup_pin(probe_pin, can_invert=True, can_pullup=True)
-        mcu = pin_params["chip"]
-        self.mcu_endstop_z = mcu.setup_pin("endstop", pin_params)
-        self.log_homing_data = config.getboolean("log_homing_data", False)
-        self.stepper_enable_dwell_time = config.getfloat("stepper_enable_dwell_time", 0.1)
-        # Add wrapper methods for endstops
-        self.get_mcu = self.mcu_endstop_z.get_mcu
-        self.steppers = {}
-        self.home_start = self.mcu_endstop_z.home_start
-        self.home_wait = self.mcu_endstop_z.home_wait
-        self.query_endstop = self.mcu_endstop_z.query_endstop
+        # change probe_pin to sensor_pin to match bltouch
+        ppins = self.printer.lookup_object('pins')
+        self.mcu_endstop = ppins.setup_pin('endstop', config.get('probe_pin'))
 
 
-        # Register commands and callbacks
-        self.gcode = self.printer.lookup_object("gcode")
-        self.gcode.register_mux_command("SET_ACCEL_PROBE", "CHIP", None, self.cmd_SET_ACCEL_PROBE, desc=self.cmd_SET_ACCEL_PROBE_help, )
-        self.gcode.register_mux_command("HOTEND_FAN_OFF", "CHIP", None, self.cmd_HOTEND_FAN_OFF, )
-        self.gcode.register_mux_command("HOTEND_FAN_ON", "CHIP", None, self.cmd_HOTEND_FAN_ON, )
 
-        self.homing_helper = probe.DescendToEndstopHelper(config, self, probe_offsets, param_helper, always_check_movement=False)
 
-        # "act" mode
-        self.act_thresh_z = config.getfloat("act_thresh_z", minval=1, maxval=255)
+        # from .cfg get and validate the adxl345 interrupt pin (int1 or int2)
+        int_pin = config.get("int_pin").strip()
+        if int_pin != "int1" and int_pin != "int2":
+            raise config.error("int_pin must be specified with either int1 or int2")
+        
+        # used later to init adxl registers
+        self.int_map = 0b01000000 if int_pin == "int2" else 0b00000000
 
+        # Wrappers
+        self.get_mcu = self.mcu_endstop.get_mcu
+        self.add_stepper = self.mcu_endstop.add_stepper
+        self.get_steppers = self.mcu_endstop.get_steppers
+        self.home_wait = self.mcu_endstop.home_wait
+        self.query_endstop = self.mcu_endstop.query_endstop
+
+        # Probing via homing to endstop
+        self.homing_helper = probe.DescendToEndstopHelper(config, self, probe_offsets, param_helper, always_check_movement=True)
+        # zzz always_check_movement=False in original
+
+        # multi probes state
+        self.multi = 'OFF'
+
+        # # Register commands
+        # self.gcode = self.printer.lookup_object('gcode')
+        # self.gcode.register_mux_command("SET_ACCEL_PROBE", self.cmd_SET_ACCEL_PROBE, desc=self.cmd_SET_ACCEL_PROBE_help, )
+        # self.gcode.register_command("HOTEND_FAN_ON", self.cmd_HOTEND_FAN_ON, desc=self.cmd_HOTEND_FAN_ON_help)
+        # self.gcode.register_command("HOTEND_FAN_OFF", self.cmd_HOTEND_FAN_OFF, desc=self.cmd_HOTEND_FAN_OFF_help)
+        
+        # Register events
         self.printer.register_event_handler("klippy:connect", self._init_adxl)
-        self.printer.register_event_handler("klippy:mcu_identify", self._handle_mcu_identify)
 
+    # initializes the adxl345 with register values. Sets it in activity mode.
     def _init_adxl(self, axis=None):
         chip = self.adxl345
-        chip.set_reg(adxl345.REG_POWER_CTL, 0x00)
-        chip.set_reg(adxl345.REG_DATA_FORMAT, 0x0B)
-        if self.inverted:
-            chip.set_reg(adxl345.REG_DATA_FORMAT, 0x2B)
+        chip.set_reg(adxl345.REG_POWER_CTL, 0b00000000)       # Set to standby mode. It is recommended to configure the device in standby mode.
+        chip.set_reg(adxl345.REG_DATA_FORMAT, 0b00001011)     # SELF_TEST off, SPI 4 wire mode, Interrupts active high, FULL_RES in full resolution mode, Justify 1, Range 11 (+/-16g)
+        
+        # zz bring the if int1 int2 and register values down to here?
         chip.set_reg(REG_INT_MAP, self.int_map)
 
-        # "act" mode
-        # z or none
+        chip.set_reg(REG_ACT_INACT_CTL, 0b11110000) # Activity AC-coupled operation (cancels out gravity). Enable all 3 axes for Activity mode.
+
         act_thresh = self.act_thresh_z
-        chip.set_reg(REG_ACT_INACT_CTL, 0xF0) # AC mode (cancels out gravity), and enable all 3 axes.
-        chip.set_reg(REG_THRESH_ACT, int(act_thresh))
+        chip.set_reg(REG_THRESH_ACT, int(act_thresh))   # Threshold value for detecting activity. Scale factor is 62.5 mg/LSB. Value of 0 may result in undesirable behavior if the act int is enabled.
 
-    def _handle_mcu_identify(self):
-        self.phoming = self.printer.lookup_object("homing")
-        kin = self.printer.lookup_object("toolhead").get_kinematics()
-        for stepper in kin.get_steppers():
-            if stepper.is_active_axis("z"): # Multiple ones of these can be true, i.e. a motor might have a part in multiple axes in a core-xy or delta printer.
-                self.add_stepper(stepper, "z")
-                self.mcu_endstop_z.add_stepper(stepper)
-                
-    def _possibly_wait_for_fan_to_stop(self, delay_if_necessary):
-        if delay_if_necessary:
-            toolhead = self.printer.lookup_object("toolhead")
-            toolhead.dwell(2.5)
-
-    def _control_fans(self, disable=True, delay_if_necessary=False):
-        self.printer.lookup_object("gcode").respond_info("control fans")
-        for fan in self.disable_fans:
-            fan = self.printer.lookup_object(fan)
-            if hasattr(fan, "fan_speed"): # For heater_fans
-                if fan.fan_speed != 0:
-                    fan._fan_speed = fan.fan_speed
-                if disable:
-                    if fan.fan_speed != 0: # Unfortunately, even if the fan isn't moving, i.e. the heater is off, this will still read as 1.0. It's only if we've already set it to 0 here previously that we can avoid adding the delay.
-                        fan.fan_speed = 0
-                        self._possibly_wait_for_fan_to_stop(delay_if_necessary)
-                else:
-                    fan.fan_speed = fan._fan_speed
-            elif hasattr(fan, "target_temp"): # For temperature_fans
-                if disable:
-                    if (fan.target_temp != fan.max_temp):
-                        fan._target_temp = fan.target_temp
-                        fan.target_temp = fan.max_temp
-                        self._possibly_wait_for_fan_to_stop(delay_if_necessary)
-                else:
-                    fan.target_temp = fan._target_temp
+        # the adxl should be prepared to measure now, only the interrupt needs to be enabled with below?
+        # chip.set_reg(REG_INT_ENABLE, 0b00010000, minclock=clock)  # Enable interrupt activity mode.
+    
 
     def run_probe(self, gcmd):
         self._probe_prepare()
@@ -125,108 +86,49 @@ class ADXL345Probe:
             self.homing_helper.descend_until_trigger(gcmd)
         except self.printer.command_error as e:
             self._probe_finish()
-            raise Exception("error: {}".format(e))
+            raise
         self._probe_finish()
     
-    def pull_probed_results(self):
-        return self.homing_helper.pull_trigger_positions()
 
-    def end_probe_session(self):
-        self.homing_helper.clear_trigger_positions()
-        self._control_fans(disable=False)
+    def _probe_prepare(self):
         chip = self.adxl345
-        chip.set_reg(adxl345.REG_POWER_CTL, 0x00)
-        self._in_multi_probe = False
 
-    def probing_move(self, pos, speed):
-        return self.phoming.probing_move(self, pos, speed, check_movement=False)
+        chip.set_reg(adxl345.REG_POWER_CTL, 0x08)
 
-    def start_probe_session(self, gcmd):
-        self.homing_helper.clear_trigger_positions()
-        self._in_multi_probe = True
-        self._done_init_for_multi_probe_yet = False
-        self._control_fans(disable=True, delay_if_necessary=True)
-        return self
-
-    def _try_clear_int(self):
-        chip = self.adxl345
-        tries = 24 # 8
-        while tries > 0:
-            val = chip.read_reg(REG_INT_SOURCE)
-            if not (val & self.int_reg_value): # That masks either TAP and ACT
-                return True
-            tries -= 1
-        return False
         
-    def _probe_prepare(self, axis="z"):
-        chip = self.adxl345
-
-        # We don't switch the fans off before homing X and Y because we don't need such sensitivity that the fans would cause any problems.
-        # If do you want to, e.g. to make sure the fans have stopped spinning before the Z probing, you can use HOTEND_FAN_OFF in your g-code.
-        if axis=="z":
-            self._control_fans(disable=True, delay_if_necessary=(axis=="z"))
-            
-        if not self._in_multi_probe or not self._done_init_for_multi_probe_yet:
-            self._init_adxl(axis)    # We only want to do one init_adxl() per multi-probe - otherwise, it gets tripped up when other corners are cut to increase speed.
-                                    # But we can't do this in multi_probe_begin() because we don't know the axis yet there - even though surely it's always gotta be z.
-            chip.set_reg(adxl345.REG_POWER_CTL, 0x08)
-            self._done_init_for_multi_probe_yet = True
-            
-        self.activate_gcode.run_gcode_from_command()
+        #self.activate_gcode.run_gcode_from_command()
         toolhead = self.printer.lookup_object("toolhead")
         toolhead.flush_step_generation()
-        if self.rest_time:
-            toolhead.dwell(self.rest_time) #ADXL345_REST_TIME)
         print_time = toolhead.get_last_move_time()
         clock = self.adxl345.mcu.print_time_to_clock(print_time)
         chip.set_reg(REG_INT_ENABLE, 0x00) # If we could only get rid of the minclock=clock, sometimes it goes wicked-fast! But sometimes ends up "triggered prior to movement".
-        #chip.read_reg(REG_INT_SOURCE)
         if not self._try_clear_int():
             raise self.printer.command_error(
                 "ADXL345 triggered before move, it may be set too sensitive."
             )
         chip.set_reg(REG_INT_ENABLE, self.int_reg_value, minclock=clock) # Enables either TAP or ACT
-            
-    def _probe_finish(self, axis="z"): # We want this function to run and finish as quickly as possible, so the probe can be pulled up away from the bed.
+
+
+
+    def start_probe_session(self, gcmd):
+        self.homing_helper.clear_trigger_positions()
+        return self
+
+
+
+    def _probe_finish(self): # We want this function to run and finish as quickly as possible, so the probe can be pulled up away from the bed.
+
         chip = self.adxl345
         toolhead = self.printer.lookup_object("toolhead")
         toolhead.dwell(ADXL345_REST_TIME)
-        #print_time = toolhead.get_last_move_time()
-        #clock = chip.mcu.print_time_to_clock(print_time)
-        #chip.set_reg(REG_INT_ENABLE, 0x00, minclock=clock) # This one slows it down a whole lot! We can leave this out so long as we only call init_adxl() once per multi-probe.
-        #self.deactivate_gcode.run_gcode_from_command()
-        if not self._in_multi_probe:
-            chip.set_reg(adxl345.REG_POWER_CTL, 0x00)
-            if axis == "z": # Fans were only automatically disabled for Z
-                self._control_fans(disable=False)
-
-    def add_stepper(self, stepper, axis=None):
-        if axis is not None:
-            if axis in self.steppers:
-                self.steppers[axis].append(stepper)
-            else:
-                self.steppers[axis] = [stepper]
-
-    def get_steppers(self, axis=None):
-        if axis is not None:
-            return self.steppers[axis]
-        return self.mcu_endstop_z.get_steppers() # This would return just the Z stepper(s)
+        chip.set_reg(adxl345.REG_POWER_CTL, 0b00000000)       # Set to standby mode.
 
 
 
 
-    cmd_SET_ACCEL_PROBE_help = "Configure ADXL345 parameters related to probing"
-    def cmd_SET_ACCEL_PROBE(self, gcmd):
-        chip = self.adxl345
-        self.act_thresh_z = gcmd.get_float("ACT_THRESH_Z", self.act_thresh_z, minval=1, maxval=255)
 
-    def cmd_HOTEND_FAN_OFF(self, gcmd):
-        self._control_fans(disable=True)
 
-    def cmd_HOTEND_FAN_ON(self, gcmd):
-        self._control_fans(disable=False)
 
- 
 # Main external probe interface
 class PrinterADXL345:
     def __init__(self, config):
@@ -236,7 +138,7 @@ class PrinterADXL345:
         self.mcu_probe = ADXL345Probe(config, self.probe_offsets, self.param_helper)
         self.probe_session = probe.SampleAveragingHelper(config, self.param_helper, self.mcu_probe.start_probe_session)
         query_endstop = self.mcu_probe.query_endstop
-        self.cmd_helper = probe.ProbeCommandHelper(config, self, self.mcu_probe.query_endstop)
+        self.cmd_helper = probe.ProbeCommandHelper(config, self, query_endstop)
         probe.HomingViaProbeHelper(config, self.probe_offsets.get_offsets()[2], query_endstop)
     def get_probe_params(self, gcmd=None):
         return self.param_helper.get_probe_params(gcmd)
